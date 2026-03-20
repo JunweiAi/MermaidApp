@@ -51,6 +51,13 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }
 
+  /** Optimistic title update after rename (no full list reload). */
+  function patchDiagramTitle(id: string, newTitle: string) {
+    setDiagrams((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, title: newTitle } : d))
+    );
+  }
+
   return (
     <div className="p-8">
       <div className="mb-8 flex items-center justify-between">
@@ -78,6 +85,7 @@ export default function DashboardPage() {
               key={item.id}
               item={item}
               onRefresh={refreshList}
+              onDiagramTitleUpdate={patchDiagramTitle}
             />
           ))}
         </div>

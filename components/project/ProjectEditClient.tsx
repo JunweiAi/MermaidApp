@@ -15,9 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Code } from "lucide-react";
 import { useEditorStore } from "@/store/editorStore";
-import { useAiStore } from "@/store/aiStore";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { downloadMermaidCodeAsMmd } from "@/lib/export-mermaid";
 
 export function ProjectEditClient({ projectId }: { projectId: string }) {
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
@@ -30,7 +30,6 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState(title);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const { setSettings: setAiSettings } = useAiStore();
   const { toast } = useToast();
   const supabase = createClient();
 
@@ -68,7 +67,6 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
     const newTitle = editTitleValue.trim() || title;
     if (newTitle === title) return;
     setTitle(newTitle);
-    setHistoryRefresh((k) => k + 1);
     try {
       const res = await fetch(`/api/diagrams/${diagramId}`, {
         method: "PATCH",
@@ -82,13 +80,6 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
       toast({ title: "Update failed", variant: "destructive" });
     }
   }, [editTitleValue, title, diagramId, setTitle, toast]);
-
-  useEffect(() => {
-    fetch("/api/ai/settings")
-      .then((r) => r.json())
-      .then((data) => setAiSettings({ apiEndpoint: data.apiEndpoint ?? "", model: data.model ?? "gpt-4o-mini" }))
-      .catch(() => {});
-  }, [setAiSettings]);
 
   const handleSave = useCallback(async () => {
     if (!diagramId) return;
@@ -181,6 +172,14 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
   }, [getSvgElement, title, toast]);
 
+  const handleExportMmd = useCallback(() => {
+    if (!downloadMermaidCodeAsMmd(code, title || "diagram")) {
+      toast({ title: "No code to export", variant: "destructive" });
+      return;
+    }
+    toast({ title: "Exported .mmd" });
+  }, [code, title, toast]);
+
   const handleShare = useCallback(async () => {
     if (!diagramId) return;
     try {
@@ -255,9 +254,9 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
           View
         </Button>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
-          <Tabs defaultValue="history" className="flex flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <aside className="flex min-h-0 w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
+          <Tabs defaultValue="history" className="flex min-h-0 flex-1 flex-col">
             <TabsList className="w-full rounded-none border-b px-2">
               <TabsTrigger value="history" className="flex-1">History</TabsTrigger>
               <TabsTrigger value="ai" className="flex-1">AI</TabsTrigger>
@@ -265,8 +264,12 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
             <TabsContent value="history" className="mt-0 flex-1 overflow-auto p-2">
               <HistoryPanel refreshTrigger={historyRefresh} />
             </TabsContent>
-            <TabsContent value="ai" className="mt-0 flex-1 overflow-auto p-2">
-              <AIPanel onOpenSettings={() => setAiSettingsOpen(true)} />
+            <TabsContent value="ai" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden p-2">
+              <AIPanel
+                onOpenSettings={() => setAiSettingsOpen(true)}
+                onCodePreview={setCode}
+                onCodeGenerated={handleSaveWithCode}
+              />
             </TabsContent>
           </Tabs>
         </aside>
@@ -275,6 +278,7 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
             onSave={handleSave}
             onExportSvg={handleExportSvg}
             onExportPng={handleExportPng}
+            onExportMmd={handleExportMmd}
             onShare={handleShare}
             onOpenAiSettings={() => setAiSettingsOpen(true)}
             saveDisabled={!isDirty}
@@ -285,6 +289,8 @@ export function ProjectEditClient({ projectId }: { projectId: string }) {
                 <CanvasTopToolbar />
               </div>
               <DiagramCanvas
+                key={projectId}
+                persistViewKey={projectId}
                 code={code}
                 showGrid
                 showToolbar

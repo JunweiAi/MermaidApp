@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { AiSettingsHydrator } from "@/components/ai/AiSettingsHydrator";
 
 export const metadata: Metadata = {
   title: "MermaidApp",
@@ -15,6 +16,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body className="antialiased min-h-screen">
+        <AiSettingsHydrator />
         {children}
         <Toaster />
       </body>

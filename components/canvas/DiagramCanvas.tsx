@@ -1,22 +1,43 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import mermaid from "mermaid";
-import { useCanvasStore, getMermaidTheme } from "@/store/canvasStore";
+import {
+  Undo2,
+  Redo2,
+  ZoomIn,
+  ZoomOut,
+  ScanSearch,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
+import { useCanvasStore, type MermaidThemeKey } from "@/store/canvasStore";
+import { getMermaidInitConfig } from "@/lib/mermaid-theme-init";
+import { applyReduxColorSequenceSvg } from "@/lib/mermaid-redux-color-svg";
+import { loadCanvasView, saveCanvasView } from "@/lib/canvas-view-storage";
 import { cn } from "@/lib/utils";
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "loose",
-});
+mermaid.initialize(getMermaidInitConfig("redux"));
 
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
 const SCALE_STEP = 0.25;
 const DEFAULT_SCALE = 1.5;
 
+type ViewSnapshot = { scale: number; translate: { x: number; y: number } };
+
+function snapshotsEqual(a: ViewSnapshot, b: ViewSnapshot) {
+  return (
+    a.scale === b.scale &&
+    a.translate.x === b.translate.x &&
+    a.translate.y === b.translate.y
+  );
+}
+
 export interface DiagramCanvasProps {
   code: string;
+  /** When set (e.g. diagram id), zoom/pan are restored from localStorage on enter and saved on leave. */
+  persistViewKey?: string;
   theme?: string;
   className?: string;
   showGrid?: boolean;
@@ -27,6 +48,7 @@ export interface DiagramCanvasProps {
 
 export function DiagramCanvas({
   code,
+  persistViewKey,
   theme: themeProp,
   className,
   showGrid = true,
@@ -36,30 +58,122 @@ export function DiagramCanvas({
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const svgHostRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const renderIdRef = useRef(0);
+  /** Ignore stale mermaid.render results when code/theme changes (avoids error overwriting success). */
+  const renderSeqRef = useRef(0);
   const { theme: storeTheme } = useCanvasStore();
-  const themeKey = themeProp ?? storeTheme;
-  const mermaidTheme = getMermaidTheme(
-    themeKey as Parameters<typeof getMermaidTheme>[0]
-  ) || "neutral";
+  const themeKey = (themeProp ?? storeTheme) as MermaidThemeKey;
+  const isReduxColorTheme = themeKey === "reduxColor" || themeKey === "reduxColorDark";
   const [fullscreen, setFullscreen] = useState(false);
   const [scale, setScale] = useState(DEFAULT_SCALE);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const scaleRef = useRef(scale);
+  const translateRef = useRef(translate);
+  scaleRef.current = scale;
+  translateRef.current = translate;
+
+  const viewHistoryRef = useRef<ViewSnapshot[]>([
+    { scale: DEFAULT_SCALE, translate: { x: 0, y: 0 } },
+  ]);
+  const historyIndexRef = useRef(0);
+  const panStartTranslateRef = useRef<{ x: number; y: number } | null>(null);
+  const wheelCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [, setHistoryVersion] = useState(0);
+
   const isPanning = useRef(false);
   const startPan = useRef({ x: 0, y: 0 });
   const { panMode } = useCanvasStore();
 
+  const pushViewHistory = useCallback((snap: ViewSnapshot) => {
+    const stack = viewHistoryRef.current;
+    const idx = historyIndexRef.current;
+    const cur = stack[idx];
+    if (cur && snapshotsEqual(cur, snap)) return;
+    viewHistoryRef.current = stack.slice(0, idx + 1).concat([snap]);
+    historyIndexRef.current = viewHistoryRef.current.length - 1;
+    setHistoryVersion((v) => v + 1);
+  }, []);
+
+  const applyHistoryIndex = useCallback((nextIndex: number) => {
+    const stack = viewHistoryRef.current;
+    if (nextIndex < 0 || nextIndex >= stack.length) return;
+    historyIndexRef.current = nextIndex;
+    const snap = stack[nextIndex];
+    setScale(snap.scale);
+    setTranslate({ ...snap.translate });
+    setHistoryVersion((v) => v + 1);
+  }, []);
+
+  const undoView = useCallback(() => {
+    const i = historyIndexRef.current;
+    if (i <= 0) return;
+    applyHistoryIndex(i - 1);
+  }, [applyHistoryIndex]);
+
+  const redoView = useCallback(() => {
+    const stack = viewHistoryRef.current;
+    const i = historyIndexRef.current;
+    if (i >= stack.length - 1) return;
+    applyHistoryIndex(i + 1);
+  }, [applyHistoryIndex]);
+
+  const scheduleWheelHistoryCommit = useCallback(() => {
+    if (wheelCommitTimerRef.current) clearTimeout(wheelCommitTimerRef.current);
+    wheelCommitTimerRef.current = setTimeout(() => {
+      wheelCommitTimerRef.current = null;
+      pushViewHistory({
+        scale: scaleRef.current,
+        translate: { ...translateRef.current },
+      });
+    }, 350);
+  }, [pushViewHistory]);
+
+  /** Restore zoom/pan from localStorage before paint (per diagram). */
+  useLayoutEffect(() => {
+    if (!persistViewKey) return;
+    const snap = loadCanvasView(persistViewKey);
+    if (!snap) return;
+    scaleRef.current = snap.scale;
+    translateRef.current = snap.translate;
+    setScale(snap.scale);
+    setTranslate({ ...snap.translate });
+    viewHistoryRef.current = [snap];
+    historyIndexRef.current = 0;
+    setHistoryVersion((v) => v + 1);
+  }, [persistViewKey]);
+
+  /** Save zoom/pan when leaving the page or unmounting. */
   useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: mermaidTheme as "default" | "neutral" | "dark" | "forest" | "base",
-      securityLevel: "loose",
-    });
-  }, [mermaidTheme]);
+    if (!persistViewKey) return;
+    const key = persistViewKey;
+    const persist = () => {
+      saveCanvasView(key, {
+        scale: scaleRef.current,
+        translate: { ...translateRef.current },
+      });
+    };
+    const onPageHide = () => persist();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") persist();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      persist();
+    };
+  }, [persistViewKey]);
 
   useEffect(() => {
+    mermaid.initialize(getMermaidInitConfig(themeKey));
+  }, [themeKey]);
+
+  useEffect(() => {
+    const seq = ++renderSeqRef.current;
     if (!code.trim()) {
       setSvg(null);
       setError(null);
@@ -69,14 +183,23 @@ export function DiagramCanvas({
     mermaid
       .render(id, code)
       .then(({ svg: result }) => {
+        if (seq !== renderSeqRef.current) return;
         setSvg(result);
         setError(null);
       })
       .catch((err: Error) => {
+        if (seq !== renderSeqRef.current) return;
         setError(err.message ?? "Invalid Mermaid syntax");
         setSvg(null);
       });
-  }, [code, mermaidTheme]);
+  }, [code, themeKey]);
+
+  useLayoutEffect(() => {
+    if (!svg || !isReduxColorTheme) return;
+    applyReduxColorSequenceSvg(svgHostRef.current, {
+      dark: themeKey === "reduxColorDark",
+    });
+  }, [svg, isReduxColorTheme, themeKey]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -88,6 +211,15 @@ export function DiagramCanvas({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [fullscreen]);
+
+  /** Keep UI in sync when user exits fullscreen via browser UI / Esc */
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
 
   // 使用 passive: false 才能阻止 Ctrl+滚轮时浏览器的默认缩放
   useEffect(() => {
@@ -101,42 +233,82 @@ export function DiagramCanvas({
   }, []);
 
   const zoomIn = useCallback(() => {
-    setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP));
-  }, []);
+    setScale((s) => {
+      const ns = Math.min(MAX_SCALE, s + SCALE_STEP);
+      queueMicrotask(() =>
+        pushViewHistory({ scale: ns, translate: { ...translateRef.current } })
+      );
+      return ns;
+    });
+  }, [pushViewHistory]);
   const zoomOut = useCallback(() => {
-    setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP));
-  }, []);
+    setScale((s) => {
+      const ns = Math.max(MIN_SCALE, s - SCALE_STEP);
+      queueMicrotask(() =>
+        pushViewHistory({ scale: ns, translate: { ...translateRef.current } })
+      );
+      return ns;
+    });
+  }, [pushViewHistory]);
   const resetTransform = useCallback(() => {
-    setScale(DEFAULT_SCALE);
-    setTranslate({ x: 0, y: 0 });
-  }, []);
+    const snap = { scale: DEFAULT_SCALE, translate: { x: 0, y: 0 } };
+    setScale(snap.scale);
+    setTranslate(snap.translate);
+    queueMicrotask(() => pushViewHistory(snap));
+  }, [pushViewHistory]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (!e.ctrlKey) return;
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
-    setScale((s) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s + delta)));
-  }, []);
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
+      setScale((s) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s + delta)));
+      scheduleWheelHistoryCommit();
+    },
+    [scheduleWheelHistoryCommit]
+  );
 
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    if (!panMode || e.button !== 0) return;
-    isPanning.current = true;
-    startPan.current = { x: e.clientX - translate.x, y: e.clientY - translate.y };
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-  }, [panMode, translate]);
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!panMode || e.button !== 0) return;
+      e.preventDefault();
+      isPanning.current = true;
+      panStartTranslateRef.current = { ...translateRef.current };
+      startPan.current = { x: e.clientX - translate.x, y: e.clientY - translate.y };
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    },
+    [panMode, translate.x, translate.y]
+  );
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!panMode || !isPanning.current) return;
+    e.preventDefault();
     setTranslate({
       x: e.clientX - startPan.current.x,
       y: e.clientY - startPan.current.y,
     });
   }, [panMode]);
 
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (e.button === 0) isPanning.current = false;
-    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-  }, []);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button === 0) {
+        if (isPanning.current && panStartTranslateRef.current) {
+          const start = panStartTranslateRef.current;
+          const end = translateRef.current;
+          if (start.x !== end.x || start.y !== end.y) {
+            pushViewHistory({
+              scale: scaleRef.current,
+              translate: { ...end },
+            });
+          }
+          panStartTranslateRef.current = null;
+        }
+        isPanning.current = false;
+      }
+      (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    },
+    [pushViewHistory]
+  );
 
   const gridClass = showGrid
     ? "bg-[length:24px_24px] bg-[image:linear-gradient(rgba(0,0,0,.06)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,.06)_1px,transparent_1px)]"
@@ -145,17 +317,25 @@ export function DiagramCanvas({
   return (
     <div
       ref={toolbarRef ?? containerRef}
-      className={cn("relative h-full w-full overflow-hidden", className)}
+      className={cn(
+        "relative h-full w-full overflow-hidden",
+        fullscreen && "bg-background",
+        className
+      )}
       style={{ minHeight }}
     >
       <div
         ref={scrollAreaRef}
-        className={cn("h-full w-full overflow-hidden", gridClass)}
+        className={cn(
+          "h-full w-full overflow-hidden select-none",
+          panMode && "touch-none",
+          gridClass
+        )}
         onWheel={handleWheel}
         style={{ cursor: panMode ? (isPanning.current ? "grabbing" : "grab") : "default" }}
       >
         <div
-          className="flex min-h-full min-w-full items-center justify-center p-8"
+          className="flex min-h-full min-w-full select-none items-center justify-center p-8 [&_*]:select-none"
           style={{
             transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
             transformOrigin: "center center",
@@ -170,7 +350,11 @@ export function DiagramCanvas({
           )}
           {svg && !error && (
             <div
-              className="[&_svg]:max-w-full [&_svg]:shadow-lg"
+              ref={svgHostRef}
+              className={cn(
+                "[&_svg]:max-w-full [&_svg]:shadow-lg",
+                isReduxColorTheme && "mermaid-redux-color"
+              )}
               dangerouslySetInnerHTML={{ __html: svg }}
             />
           )}
@@ -178,6 +362,10 @@ export function DiagramCanvas({
       </div>
       {showToolbar && (
         <CanvasToolbar
+          onUndo={undoView}
+          onRedo={redoView}
+          canUndo={historyIndexRef.current > 0}
+          canRedo={historyIndexRef.current < viewHistoryRef.current.length - 1}
           zoomIn={zoomIn}
           zoomOut={zoomOut}
           resetTransform={resetTransform}
@@ -199,53 +387,108 @@ export function DiagramCanvas({
   );
 }
 
+function ToolbarDivider() {
+  return <span className="mx-0.5 h-6 w-px shrink-0 bg-teal-200/70" aria-hidden />;
+}
+
 function CanvasToolbar({
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
   zoomIn,
   zoomOut,
   resetTransform,
   fullscreen,
   onFullscreenToggle,
 }: {
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   zoomIn: () => void;
   zoomOut: () => void;
   resetTransform: () => void;
   fullscreen: boolean;
   onFullscreenToggle: () => void;
 }) {
+  const iconBtn =
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition-colors hover:bg-white/70 disabled:pointer-events-none disabled:opacity-35";
+
   return (
-    <div className="absolute bottom-4 right-4 flex gap-1 rounded-md border border-gray-200 bg-white/95 p-1 shadow-sm">
-      <button
-        type="button"
-        className="rounded p-2 hover:bg-gray-100"
-        onClick={zoomOut}
-        aria-label="Zoom out"
-      >
-        <span className="text-sm font-medium">−</span>
-      </button>
-      <button
-        type="button"
-        className="rounded p-2 hover:bg-gray-100"
-        onClick={zoomIn}
-        aria-label="Zoom in"
-      >
-        <span className="text-sm font-medium">+</span>
-      </button>
-      <button
-        type="button"
-        className="rounded p-2 hover:bg-gray-100"
-        onClick={resetTransform}
-        aria-label="Fit"
-      >
-        <span className="text-xs">Fit</span>
-      </button>
-      <button
-        type="button"
-        className="rounded p-2 hover:bg-gray-100"
-        onClick={onFullscreenToggle}
-        aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-      >
-        <span className="text-xs">{fullscreen ? "Exit" : "Full"}</span>
-      </button>
+    <div
+      className="absolute bottom-4 right-4 flex items-center gap-0.5 rounded-full border border-teal-100/90 bg-[#ecfdf5]/95 px-1.5 py-1 shadow-md backdrop-blur-sm"
+      role="toolbar"
+      aria-label="Canvas tools"
+    >
+      <div className="flex items-center gap-0.5 px-0.5">
+        <button
+          type="button"
+          className={iconBtn}
+          onClick={onUndo}
+          disabled={!canUndo}
+          aria-label="Undo view"
+          title="Undo (view)"
+        >
+          <Undo2 className="h-4 w-4" strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className={iconBtn}
+          onClick={onRedo}
+          disabled={!canRedo}
+          aria-label="Redo view"
+          title="Redo (view)"
+        >
+          <Redo2 className="h-4 w-4" strokeWidth={2} />
+        </button>
+      </div>
+      <ToolbarDivider />
+      <div className="flex items-center gap-0.5 px-0.5">
+        <button
+          type="button"
+          className={iconBtn}
+          onClick={zoomOut}
+          aria-label="Zoom out"
+          title="Zoom out"
+        >
+          <ZoomOut className="h-4 w-4" strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className={iconBtn}
+          onClick={zoomIn}
+          aria-label="Zoom in"
+          title="Zoom in"
+        >
+          <ZoomIn className="h-4 w-4" strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className={iconBtn}
+          onClick={resetTransform}
+          aria-label="Reset zoom and position"
+          title="Fit / reset view"
+        >
+          <ScanSearch className="h-4 w-4" strokeWidth={2} />
+        </button>
+      </div>
+      <ToolbarDivider />
+      <div className="flex items-center px-0.5">
+        <button
+          type="button"
+          className={iconBtn}
+          onClick={onFullscreenToggle}
+          aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+        >
+          {fullscreen ? (
+            <Minimize2 className="h-4 w-4" strokeWidth={2} />
+          ) : (
+            <Maximize2 className="h-4 w-4" strokeWidth={2} />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

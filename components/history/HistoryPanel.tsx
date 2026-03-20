@@ -26,7 +26,7 @@ export function HistoryPanel({
 }: HistoryPanelProps) {
   const [items, setItems] = useState<DiagramItem[]>(initialData);
   const [loading, setLoading] = useState(true);
-  const { loadDiagram, diagramId } = useEditorStore();
+  const { loadDiagram, diagramId, title: storeTitle } = useEditorStore();
 
   useEffect(() => {
     async function fetchList() {
@@ -81,7 +81,9 @@ export function HistoryPanel({
             onClick={() => handleSelect(item)}
           >
             <FileText className="h-4 w-4 shrink-0" />
-            <span className="truncate">{item.title}</span>
+            <span className="truncate">
+              {diagramId === item.id ? storeTitle : item.title}
+            </span>
           </Button>
         </li>
       ))}

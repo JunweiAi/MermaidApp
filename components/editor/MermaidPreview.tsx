@@ -18,6 +18,7 @@ export function MermaidPreview() {
   const [error, setError] = useState<string | null>(null);
   const { code } = useEditorStore();
   const renderIdRef = useRef(0);
+  const renderSeqRef = useRef(0);
   const [debouncedCode, setDebouncedCode] = useState(code);
   const debounceRef = useRef(debounce((c: string) => setDebouncedCode(c), 300));
 
@@ -26,6 +27,7 @@ export function MermaidPreview() {
   }, [code]);
 
   useEffect(() => {
+    const seq = ++renderSeqRef.current;
     const id = `mermaid-${Date.now()}-${renderIdRef.current++}`;
     if (!debouncedCode.trim()) {
       setSvg(null);
@@ -35,10 +37,12 @@ export function MermaidPreview() {
     mermaid
       .render(id, debouncedCode)
       .then(({ svg: result }) => {
+        if (seq !== renderSeqRef.current) return;
         setSvg(result);
         setError(null);
       })
       .catch((err: Error) => {
+        if (seq !== renderSeqRef.current) return;
         setError(err.message ?? "Invalid Mermaid syntax");
         setSvg(null);
       });

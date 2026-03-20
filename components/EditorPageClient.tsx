@@ -12,9 +12,9 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import { useEditorStore } from "@/store/editorStore";
-import { useAiStore } from "@/store/aiStore";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { downloadMermaidCodeAsMmd } from "@/lib/export-mermaid";
 import { Moon, Sun } from "lucide-react";
 
 export function EditorPageClient() {
@@ -35,15 +35,7 @@ export function EditorPageClient() {
   }
   const router = useRouter();
   const { isDirty, code, title, diagramId, loadDiagram, setDirty, setTitle, setCode } = useEditorStore();
-  const { setSettings: setAiSettings } = useAiStore();
   const { toast } = useToast();
-
-  useEffect(() => {
-    fetch("/api/ai/settings")
-      .then((r) => r.json())
-      .then((data) => setAiSettings({ apiEndpoint: data.apiEndpoint ?? "", model: data.model ?? "gpt-4o-mini" }))
-      .catch(() => {});
-  }, [setAiSettings]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -168,6 +160,14 @@ export function EditorPageClient() {
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
   }, [getSvgElement, title, toast]);
 
+  const handleExportMmd = useCallback(() => {
+    if (!downloadMermaidCodeAsMmd(code, title || "diagram")) {
+      toast({ title: "No code to export", variant: "destructive" });
+      return;
+    }
+    toast({ title: "Exported .mmd" });
+  }, [code, title, toast]);
+
   const handleShare = useCallback(async () => {
     try {
       let id = diagramId;
@@ -211,9 +211,9 @@ export function EditorPageClient() {
           </Button>
         </div>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="flex w-64 shrink-0 flex-col border-r">
-          <Tabs defaultValue="history" className="flex flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <aside className="flex min-h-0 w-64 shrink-0 flex-col border-r">
+          <Tabs defaultValue="history" className="flex min-h-0 flex-1 flex-col">
             <TabsList className="w-full rounded-none border-b px-2">
               <TabsTrigger value="history" className="flex-1">
                 History
@@ -225,13 +225,11 @@ export function EditorPageClient() {
             <TabsContent value="history" className="mt-0 flex-1 overflow-auto p-2">
               <HistoryPanel refreshTrigger={historyRefresh} />
             </TabsContent>
-            <TabsContent value="ai" className="mt-0 flex-1 overflow-auto p-2">
+            <TabsContent value="ai" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden p-2">
               <AIPanel
                 onOpenSettings={() => setAiSettingsOpen(true)}
-                onCodeGenerated={(newCode) => {
-                  setCode(newCode);
-                  handleSaveWithCode(newCode);
-                }}
+                onCodePreview={setCode}
+                onCodeGenerated={handleSaveWithCode}
               />
             </TabsContent>
           </Tabs>
@@ -241,6 +239,7 @@ export function EditorPageClient() {
             onSave={handleSave}
             onExportSvg={handleExportSvg}
             onExportPng={handleExportPng}
+            onExportMmd={handleExportMmd}
             onShare={handleShare}
             onOpenAiSettings={() => setAiSettingsOpen(true)}
             saveDisabled={!isDirty}

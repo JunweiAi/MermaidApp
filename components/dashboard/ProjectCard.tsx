@@ -29,9 +29,12 @@ mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "loose
 export function ProjectCard({
   item,
   onRefresh,
+  onDiagramTitleUpdate,
 }: {
   item: DiagramItem;
   onRefresh: () => void;
+  /** Update list item title without refetch (optimistic rename). */
+  onDiagramTitleUpdate?: (id: string, newTitle: string) => void;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -75,15 +78,27 @@ export function ProjectCard({
   }
 
   async function saveEditTitle() {
-    const res = await fetch(`/api/diagrams/${item.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: editTitle }),
-    });
-    if (!res.ok) return;
+    const trimmed = editTitle.trim() || item.title;
+    if (trimmed === item.title) {
+      setEditOpen(false);
+      return;
+    }
+    const previousTitle = item.title;
     setEditOpen(false);
-    onRefresh();
-    toast({ title: "Updated" });
+    onDiagramTitleUpdate?.(item.id, trimmed);
+
+    try {
+      const res = await fetch(`/api/diagrams/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      toast({ title: "Updated" });
+    } catch {
+      onDiagramTitleUpdate?.(item.id, previousTitle);
+      toast({ title: "Update failed", variant: "destructive" });
+    }
   }
 
   async function handleDuplicate() {

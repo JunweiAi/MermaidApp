@@ -56,4 +56,16 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /**
+   * Fullscreen API: the promoted element has no inherited page background;
+   * without this, browsers often show black behind transparent areas.
+   */
+  :-webkit-full-screen,
+  :fullscreen {
+    background-color: hsl(var(--background));
+    min-height: 100vh;
+    min-width: 100%;
+    box-sizing: border-box;
+  }
 }

@@ -7,8 +7,15 @@ import { DiagramCanvas } from "@/components/canvas/DiagramCanvas";
 import { CanvasTopToolbar } from "@/components/canvas/CanvasTopToolbar";
 import { FloatingCodePanel } from "@/components/project/FloatingCodePanel";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Code, Share2, Download } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronRight, Code, Share2, Download, Image as ImageIcon, FileCode, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { downloadMermaidCodeAsMmd } from "@/lib/export-mermaid";
 
 export default function ProjectRenderPage() {
   const params = useParams();
@@ -84,7 +91,39 @@ export default function ProjectRenderPage() {
       .catch(() => toast({ title: "Share failed", variant: "destructive" }));
   }
 
-  function handleExportSvg() {
+  const handleExportPng = useCallback(() => {
+    const svg = canvasRef.current?.querySelector("svg");
+    if (!svg) {
+      toast({ title: "Export failed", variant: "destructive" });
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const bbox = svg.getBBox();
+    canvas.width = bbox.width + 40;
+    canvas.height = bbox.height + 40;
+    const img = new Image();
+    const svgData = new XMLSerializer().serializeToString(svg);
+    img.onload = () => {
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 20, 20);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${diagram?.title ?? "diagram"}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({ title: "Exported PNG" });
+      });
+    };
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
+  }, [diagram?.title, toast]);
+
+  const handleExportSvg = useCallback(() => {
     const svg = canvasRef.current?.querySelector("svg");
     if (!svg) {
       toast({ title: "Export failed", variant: "destructive" });
@@ -99,7 +138,15 @@ export default function ProjectRenderPage() {
     a.click();
     URL.revokeObjectURL(url);
     toast({ title: "Exported SVG" });
-  }
+  }, [diagram?.title, toast]);
+
+  const handleExportMmd = useCallback(() => {
+    if (!downloadMermaidCodeAsMmd(code, diagram?.title ?? "diagram")) {
+      toast({ title: "No code to export", variant: "destructive" });
+      return;
+    }
+    toast({ title: "Exported .mmd" });
+  }, [code, diagram?.title, toast]);
 
   if (loading) {
     return (
@@ -135,10 +182,28 @@ export default function ProjectRenderPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleExportSvg}>
-            <Download className="mr-1 h-4 w-4" />
-            Export
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExportPng} className="gap-2">
+                <ImageIcon className="h-4 w-4" aria-hidden />
+                PNG
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportSvg} className="gap-2">
+                <FileCode className="h-4 w-4" aria-hidden />
+                SVG
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportMmd} className="gap-2">
+                <FileText className="h-4 w-4" aria-hidden />
+                Mermaid code (.mmd)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" onClick={handleShare}>
             <Share2 className="mr-1 h-4 w-4" />
             Share
@@ -175,6 +240,8 @@ export default function ProjectRenderPage() {
 
         <div ref={canvasRef} className="h-full w-full">
           <DiagramCanvas
+            key={id}
+            persistViewKey={id}
             code={code}
             showGrid
             showToolbar

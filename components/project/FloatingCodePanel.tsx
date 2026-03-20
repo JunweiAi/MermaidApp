@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { X, FileCode, Sparkles } from "lucide-react";
+import { X, FileCode, Sparkles, Settings } from "lucide-react";
 import { AIPanel } from "@/components/ai/AIPanel";
 import { AISettingsDialog } from "@/components/ai/AISettingsDialog";
 import { cn } from "@/lib/utils";
@@ -41,12 +41,19 @@ export function FloatingCodePanel({
     [autoUpdate, onCodeChange]
   );
 
-  const handleCodeGenerated = useCallback(
+  /** Stream: update local code / preview only; save runs once when generation completes. */
+  const handleCodePreview = useCallback(
     (code: string) => {
       onCodeChange(code);
+    },
+    [onCodeChange]
+  );
+
+  const handleCodeGenerated = useCallback(
+    (code: string) => {
       onAfterCodeGenerated?.(code);
     },
-    [onCodeChange, onAfterCodeGenerated]
+    [onAfterCodeGenerated]
   );
 
   const isFill = variant === "fill";
@@ -61,7 +68,7 @@ export function FloatingCodePanel({
             : "absolute left-4 top-16 z-20 w-[min(450px,calc(100vw-2rem))] h-[80vh]"
         )}
       >
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-2">
             <TabsList className="h-9 justify-start gap-0 rounded-none border-0 bg-transparent p-0">
               <TabsTrigger
@@ -79,7 +86,7 @@ export function FloatingCodePanel({
                 Use AI
               </TabsTrigger>
             </TabsList>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               <label className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap">
                 <input
                   type="checkbox"
@@ -89,6 +96,16 @@ export function FloatingCodePanel({
                 />
                 Auto-Update
               </label>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                onClick={() => setAiSettingsOpen(true)}
+                aria-label="AI Settings"
+                title="AI Settings"
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -120,9 +137,13 @@ export function FloatingCodePanel({
               />
             </div>
           </TabsContent>
-          <TabsContent value="ai" className="mt-0 flex-1 overflow-auto p-3 data-[state=inactive]:hidden">
+          <TabsContent
+            value="ai"
+            className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden p-3 data-[state=inactive]:hidden"
+          >
             <AIPanel
               onOpenSettings={() => setAiSettingsOpen(true)}
+              onCodePreview={handleCodePreview}
               onCodeGenerated={handleCodeGenerated}
             />
           </TabsContent>

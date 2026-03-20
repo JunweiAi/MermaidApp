@@ -29,7 +29,7 @@ interface CanvasState {
 }
 
 export const useCanvasStore = create<CanvasState>((set) => ({
-  theme: "neo",
+  theme: "redux",
   panMode: false,
   setTheme: (theme) => set({ theme }),
   setPanMode: (panMode) => set({ panMode }),

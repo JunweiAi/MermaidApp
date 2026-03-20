@@ -14,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAiStore } from "@/store/aiStore";
 import { useToast } from "@/hooks/use-toast";
+import { createClient } from "@/lib/supabase/client";
+import { saveAiLocalSettings } from "@/lib/ai-local-settings";
 
 export interface AISettingsDialogProps {
   open: boolean;
@@ -39,18 +41,26 @@ export function AISettingsDialog({ open, onOpenChange }: AISettingsDialogProps) 
   async function handleSave() {
     setSaving(true);
     try {
-      const res = await fetch("/api/ai/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_endpoint: endpoint,
-          api_key: key,
-          model: modelValue,
-        }),
-      });
-      if (!res.ok) throw new Error("保存失败");
-      setSettings({ apiEndpoint: endpoint, apiKey: key, model: modelValue });
-      toast({ title: "AI settings saved" });
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: "Sign in required",
+          description: "AI settings are stored per account in this browser. Please sign in first.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const payload = {
+        apiEndpoint: endpoint.trim(),
+        apiKey: key,
+        model: modelValue.trim() || "gpt-4o-mini",
+      };
+      saveAiLocalSettings(user.id, payload);
+      setSettings(payload);
+      toast({ title: "AI settings saved locally" });
       onOpenChange(false);
     } catch {
       toast({ title: "Save failed", variant: "destructive" });
@@ -65,7 +75,9 @@ export function AISettingsDialog({ open, onOpenChange }: AISettingsDialogProps) 
         <DialogHeader>
           <DialogTitle>AI Settings</DialogTitle>
           <DialogDescription>
-            Configure an OpenAI-compatible API (e.g. DeepSeek, etc.) for Mermaid code generation.
+            Configure an OpenAI-compatible API for Mermaid code generation. Endpoint, API key, and
+            model are stored only in this browser, keyed to your signed-in account (not on our
+            servers).
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">

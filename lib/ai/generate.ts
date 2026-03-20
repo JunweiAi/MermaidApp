@@ -43,13 +43,19 @@ function extractContentFromStream(stream: ReadableStream<Uint8Array>): ReadableS
   });
 }
 
+export type ChatMessagePayload = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
 export async function streamChatCompletion(params: {
   endpoint: string;
   apiKey: string;
   model: string;
-  prompt: string;
+  /** Full message list including system as first item */
+  messages: ChatMessagePayload[];
 }): Promise<ReadableStream<Uint8Array>> {
-  const { endpoint, apiKey, model, prompt } = params;
+  const { endpoint, apiKey, model, messages } = params;
   const url = endpoint.replace(/\/$/, "") + "/chat/completions";
   const res = await fetch(url, {
     method: "POST",
@@ -59,13 +65,7 @@ export async function streamChatCompletion(params: {
     },
     body: JSON.stringify({
       model,
-      messages: [
-        {
-          role: "system",
-          content: `You are a Mermaid diagram expert. Reply with ONLY valid Mermaid diagram code, no markdown fences, no explanation. Use flowchart, sequenceDiagram, classDiagram, stateDiagram, etc. as appropriate.`,
-        },
-        { role: "user", content: prompt },
-      ],
+      messages,
       stream: true,
     }),
   });

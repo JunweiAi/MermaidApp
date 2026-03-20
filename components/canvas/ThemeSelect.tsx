@@ -13,7 +13,7 @@ import { useCanvasStore, THEME_OPTIONS } from "@/store/canvasStore";
 export function ThemeSelect() {
   const { theme, setTheme } = useCanvasStore();
 
-  const currentLabel = THEME_OPTIONS.find((o) => o.value === theme)?.label ?? "Neo";
+  const currentLabel = THEME_OPTIONS.find((o) => o.value === theme)?.label ?? "Redux";
 
   return (
     <DropdownMenu>
