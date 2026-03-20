@@ -1,39 +1,32 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
-import { streamChatCompletion, type ChatMessagePayload } from "@/lib/ai/generate";
+import { streamChatCompletion } from "@/lib/ai/generate";
+import type { ChatMessagePayload } from "@/lib/ai/multimodal-types";
 import { MERMAID_AI_SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
+import { normalizeClientConversation } from "@/lib/ai/normalize-conversation";
 
-const MAX_CONVERSATION_MESSAGES = 40; // user+assistant pairs, excluding system
-const MAX_MESSAGE_CHARS = 120_000;
+const MAX_CONVERSATION_MESSAGES = 40;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const body = await request.json().catch(() => ({}));
   const prompt = (body.prompt as string) || "";
-  const rawConversation = body.conversation as
-    | Array<{ role: string; content: string }>
-    | undefined;
+  const rawConversation = body.conversation;
 
   let conversation: ChatMessagePayload[];
 
   if (Array.isArray(rawConversation) && rawConversation.length > 0) {
-    const trimmed = rawConversation
-      .filter(
-        (m) =>
-          m &&
-          (m.role === "user" || m.role === "assistant") &&
-          typeof m.content === "string"
-      )
-      .map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content.slice(0, MAX_MESSAGE_CHARS),
-      }))
-      .slice(-MAX_CONVERSATION_MESSAGES);
-
+    const normalized = normalizeClientConversation(rawConversation);
+    if (!normalized.ok) {
+      return NextResponse.json({ error: normalized.error }, { status: 400 });
+    }
+    const trimmed = normalized.messages.slice(-MAX_CONVERSATION_MESSAGES);
     if (trimmed.length === 0) {
       return NextResponse.json({ error: "conversation is empty" }, { status: 400 });
     }
@@ -44,10 +37,7 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    conversation = [
-      { role: "system", content: MERMAID_AI_SYSTEM_PROMPT },
-      ...trimmed,
-    ];
+    conversation = [{ role: "system", content: MERMAID_AI_SYSTEM_PROMPT }, ...trimmed];
   } else if (prompt.trim()) {
     conversation = [
       { role: "system", content: MERMAID_AI_SYSTEM_PROMPT },

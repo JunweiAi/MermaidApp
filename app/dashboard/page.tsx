@@ -76,7 +76,7 @@ export default function DashboardPage() {
         <div className="flex justify-center py-16 text-gray-500">Loading…</div>
       ) : diagrams.length === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-12 text-center text-gray-500 shadow-sm">
-          No diagrams yet. Click "New diagram" to start
+          {`No diagrams yet. Click "New diagram" to start`}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">

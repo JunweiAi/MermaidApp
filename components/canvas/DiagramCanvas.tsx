@@ -15,6 +15,12 @@ import { useCanvasStore, type MermaidThemeKey } from "@/store/canvasStore";
 import { getMermaidInitConfig } from "@/lib/mermaid-theme-init";
 import { applyReduxColorSequenceSvg } from "@/lib/mermaid-redux-color-svg";
 import { loadCanvasView, saveCanvasView } from "@/lib/canvas-view-storage";
+import { SvgManualEditor } from "@/components/canvas/svg-edit/SvgManualEditor";
+import {
+  cleanupAfterMermaidRender,
+  isMermaidSyntaxErrorSvgString,
+  sweepMermaidStrayRenderRoots,
+} from "@/lib/mermaid-render-cleanup";
 import { cn } from "@/lib/utils";
 
 mermaid.initialize(getMermaidInitConfig("redux"));
@@ -60,11 +66,13 @@ export function DiagramCanvas({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const svgHostRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(null);
+  /** When set, replaces Mermaid SVG for display (manual shapes). Cleared when code/theme changes. */
+  const [manualSvg, setManualSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const renderIdRef = useRef(0);
   /** Ignore stale mermaid.render results when code/theme changes (avoids error overwriting success). */
   const renderSeqRef = useRef(0);
-  const { theme: storeTheme } = useCanvasStore();
+  const { theme: storeTheme, panMode, svgEditMode, setSvgEditMode } = useCanvasStore();
   const themeKey = (themeProp ?? storeTheme) as MermaidThemeKey;
   const isReduxColorTheme = themeKey === "reduxColor" || themeKey === "reduxColorDark";
   const [fullscreen, setFullscreen] = useState(false);
@@ -85,7 +93,7 @@ export function DiagramCanvas({
 
   const isPanning = useRef(false);
   const startPan = useRef({ x: 0, y: 0 });
-  const { panMode } = useCanvasStore();
+  const displaySvg = manualSvg ?? svg;
 
   const pushViewHistory = useCallback((snap: ViewSnapshot) => {
     const stack = viewHistoryRef.current;
@@ -172,22 +180,39 @@ export function DiagramCanvas({
     mermaid.initialize(getMermaidInitConfig(themeKey));
   }, [themeKey]);
 
+  /** Manual SVG overlay is invalid after source diagram or theme changes. */
+  useEffect(() => {
+    setManualSvg(null);
+  }, [code, themeKey]);
+
   useEffect(() => {
     const seq = ++renderSeqRef.current;
     if (!code.trim()) {
       setSvg(null);
       setError(null);
+      sweepMermaidStrayRenderRoots(svgHostRef.current);
       return;
     }
+    /** Clear previous error as soon as code/theme changes so fixed syntax doesn’t keep showing stale message. */
+    setError(null);
+    sweepMermaidStrayRenderRoots(svgHostRef.current);
     const id = `canvas-${Date.now()}-${renderIdRef.current++}`;
     mermaid
       .render(id, code)
       .then(({ svg: result }) => {
+        cleanupAfterMermaidRender(id, svgHostRef.current);
         if (seq !== renderSeqRef.current) return;
+        /** Mermaid resolves with an “error diagram” SVG on parse failure — treat as error, not success. */
+        if (isMermaidSyntaxErrorSvgString(result)) {
+          setError("Syntax error in text");
+          setSvg(null);
+          return;
+        }
         setSvg(result);
         setError(null);
       })
       .catch((err: Error) => {
+        cleanupAfterMermaidRender(id, svgHostRef.current);
         if (seq !== renderSeqRef.current) return;
         setError(err.message ?? "Invalid Mermaid syntax");
         setSvg(null);
@@ -195,11 +220,11 @@ export function DiagramCanvas({
   }, [code, themeKey]);
 
   useLayoutEffect(() => {
-    if (!svg || !isReduxColorTheme) return;
+    if (!displaySvg || !isReduxColorTheme) return;
     applyReduxColorSequenceSvg(svgHostRef.current, {
       dark: themeKey === "reduxColorDark",
     });
-  }, [svg, isReduxColorTheme, themeKey]);
+  }, [displaySvg, isReduxColorTheme, themeKey]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -207,10 +232,13 @@ export function DiagramCanvas({
         document.exitFullscreen?.();
         setFullscreen(false);
       }
+      if (e.key === "Escape" && svgEditMode) {
+        setSvgEditMode(false);
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [fullscreen]);
+  }, [fullscreen, svgEditMode, setSvgEditMode]);
 
   /** Keep UI in sync when user exits fullscreen via browser UI / Esc */
   useEffect(() => {
@@ -270,27 +298,28 @@ export function DiagramCanvas({
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (!panMode || e.button !== 0) return;
+      if (svgEditMode || !panMode || e.button !== 0) return;
       e.preventDefault();
       isPanning.current = true;
       panStartTranslateRef.current = { ...translateRef.current };
       startPan.current = { x: e.clientX - translate.x, y: e.clientY - translate.y };
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     },
-    [panMode, translate.x, translate.y]
+    [svgEditMode, panMode, translate.x, translate.y]
   );
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!panMode || !isPanning.current) return;
+    if (svgEditMode || !panMode || !isPanning.current) return;
     e.preventDefault();
     setTranslate({
       x: e.clientX - startPan.current.x,
       y: e.clientY - startPan.current.y,
     });
-  }, [panMode]);
+  }, [svgEditMode, panMode]);
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (svgEditMode) return;
       if (e.button === 0) {
         if (isPanning.current && panStartTranslateRef.current) {
           const start = panStartTranslateRef.current;
@@ -307,7 +336,7 @@ export function DiagramCanvas({
       }
       (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
     },
-    [pushViewHistory]
+    [svgEditMode, pushViewHistory]
   );
 
   const gridClass = showGrid
@@ -328,11 +357,14 @@ export function DiagramCanvas({
         ref={scrollAreaRef}
         className={cn(
           "h-full w-full overflow-hidden select-none",
-          panMode && "touch-none",
+          panMode && !svgEditMode && "touch-none",
           gridClass
         )}
         onWheel={handleWheel}
-        style={{ cursor: panMode ? (isPanning.current ? "grabbing" : "grab") : "default" }}
+        style={{
+          cursor:
+            svgEditMode ? "default" : panMode ? (isPanning.current ? "grabbing" : "grab") : "default",
+        }}
       >
         <div
           className="flex min-h-full min-w-full select-none items-center justify-center p-8 [&_*]:select-none"
@@ -349,14 +381,22 @@ export function DiagramCanvas({
             <pre className="text-sm text-destructive">{error}</pre>
           )}
           {svg && !error && (
-            <div
-              ref={svgHostRef}
-              className={cn(
-                "[&_svg]:max-w-full [&_svg]:shadow-lg",
-                isReduxColorTheme && "mermaid-redux-color"
-              )}
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
+            <div className="relative">
+              <div
+                ref={svgHostRef}
+                className={cn(
+                  "[&_svg]:max-w-full [&_svg]:shadow-lg",
+                  isReduxColorTheme && "mermaid-redux-color"
+                )}
+                dangerouslySetInnerHTML={{ __html: displaySvg ?? "" }}
+              />
+              <SvgManualEditor
+                enabled={svgEditMode}
+                svgHostRef={svgHostRef}
+                svgContentKey={displaySvg}
+                onSvgChange={setManualSvg}
+              />
+            </div>
           )}
         </div>
       </div>

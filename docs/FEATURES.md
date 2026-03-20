@@ -15,7 +15,7 @@
 - **`AiSettingsHydrator`**（根 `app/layout.tsx`）在登录 / 切换账号时从本地恢复进 `useAiStore`；若本地无数据，再请求 **`GET /api/ai/settings`** 仅补 **endpoint + model**（便于从旧服务端配置迁移，**Key 需重新填一次**）。
 - **`AISettingsDialog`** 保存时只写 localStorage + 更新 store，**不再把 API Key POST 到服务器**；未登录时提示先 Sign in。
 - **`POST /api/ai/generate`**：请求体可带 `api_endpoint`、`api_key`、`model`（由 `AIPanel` 从 store 传入）。若未带 key，则回退读数据库 `ai_settings`（兼容历史数据）。
-- **多轮对话**：请求体可带 **`conversation`**：`{ role: "user" | "assistant", content: string }[]`（最后一轮须为 `user`），服务端在前面拼接系统提示（`lib/ai/system-prompt.ts`）后调用兼容 OpenAI 的 `chat/completions` 流式接口；仍兼容仅传 **`prompt`** 的单轮调用。AI 面板展示会话气泡（可 **Clear** 清空），流式过程中同步更新画布 code。
+- **多轮对话 + 贴图**：请求体可带 **`conversation`**。`assistant` 的 `content` 为字符串；`user` 的 `content` 可为 **字符串**或 **OpenAI 多模态数组**（`text` + `image_url`，图片须为 `data:image/...` base64；`image_url` 带 **`detail: "high"`** 以利识别截图）。前端 **AIPanel** 支持 **Ctrl+V 粘贴图片**（每轮最多 4 张、单张 ≤5MB），过大图会浏览器端压缩。须使用 **支持视觉的模型**；若回复「无法识别图片」，见 **`docs/AI-VISION.md`**。最后一轮须为 `user`。仍兼容仅传 **`prompt`** 的单轮调用。
 
 ---
 
@@ -34,7 +34,8 @@
 ### 2.2 顶部工具栏（CanvasTopToolbar）
 
 - **位置**：画布**顶部居中**（`left-1/2 top-4 -translate-x-1/2`）。
-- **内容**：左侧手势图标（切换 pan 模式） + 竖线分隔 + 右侧主题选择（ThemeSelect）。
+- **内容**：手势图标（切换 pan 模式）+ **铅笔图标（SVG 手动编辑）** + 竖线分隔 + 主题选择（ThemeSelect）。
+- **SVG 手动编辑**：开启后可在图上**添加**矩形 / 圆形 / 文字（`data-manual="true"` 的 `<g>`）、**拖动**选中项、**删除**（工具栏「删除」或 Delete/Backspace）。与画布平移互斥（开启编辑会关闭 pan）；**Esc** 退出编辑。说明：修改的是**当前渲染的 SVG 字符串**；**修改 Mermaid 源码或切换主题会重新渲染并清空**手动叠加层（未持久化到 `.mmd`）。
 - **样式**：浅蓝圆角条（`bg-sky-50/90`、`border-sky-200/80`）。
 - **使用场景**：渲染页、编辑页预览区、**分享页**（`/share/[shareId]`）均使用该工具栏；分享页与 `DiagramCanvas` 组合，支持 **Ctrl+滚轮缩放、手势拖动、右下角全屏/撤销重做**（与项目画布一致，不按图表 ID 持久化视图）。
 

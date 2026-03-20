@@ -24,15 +24,29 @@ export function getMermaidTheme(key: MermaidThemeKey): string {
 interface CanvasState {
   theme: MermaidThemeKey;
   panMode: boolean;
+  /** When true, canvas supports selecting/dragging/deleting manual SVG shapes (not canvas pan). */
+  svgEditMode: boolean;
   setTheme: (theme: MermaidThemeKey) => void;
   setPanMode: (enabled: boolean) => void;
+  setSvgEditMode: (enabled: boolean) => void;
 }
 
 export const useCanvasStore = create<CanvasState>((set) => ({
   theme: "redux",
   panMode: false,
+  svgEditMode: false,
   setTheme: (theme) => set({ theme }),
-  setPanMode: (panMode) => set({ panMode }),
+  setPanMode: (panMode) =>
+    set((s) => ({
+      panMode,
+      svgEditMode: panMode ? false : s.svgEditMode,
+    })),
+  setSvgEditMode: (svgEditMode) =>
+    set((s) => ({
+      svgEditMode,
+      // Avoid pan + edit fighting over pointer events
+      panMode: svgEditMode ? false : s.panMode,
+    })),
 }));
 
 export const THEME_OPTIONS: { value: MermaidThemeKey; label: string }[] = [

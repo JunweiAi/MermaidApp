@@ -1,3 +1,7 @@
+import type { ChatMessagePayload } from "@/lib/ai/multimodal-types";
+
+export type { ChatMessagePayload } from "@/lib/ai/multimodal-types";
+
 function extractContentFromStream(stream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -42,11 +46,6 @@ function extractContentFromStream(stream: ReadableStream<Uint8Array>): ReadableS
     },
   });
 }
-
-export type ChatMessagePayload = {
-  role: "system" | "user" | "assistant";
-  content: string;
-};
 
 export async function streamChatCompletion(params: {
   endpoint: string;

@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import mermaid from "mermaid";
 import { useEditorStore } from "@/store/editorStore";
 import { debounce } from "@/lib/debounce";
+import {
+  cleanupAfterMermaidRender,
+  isMermaidSyntaxErrorSvgString,
+  sweepMermaidStrayRenderRoots,
+} from "@/lib/mermaid-render-cleanup";
 import { cn } from "@/lib/utils";
 
 mermaid.initialize({
@@ -26,22 +31,38 @@ export function MermaidPreview() {
     debounceRef.current(code);
   }, [code]);
 
+  /** While `code` is ahead of debounced preview, clear stale error so a fix isn’t stuck until debounce. */
+  useEffect(() => {
+    if (code !== debouncedCode) setError(null);
+  }, [code, debouncedCode]);
+
   useEffect(() => {
     const seq = ++renderSeqRef.current;
     const id = `mermaid-${Date.now()}-${renderIdRef.current++}`;
     if (!debouncedCode.trim()) {
       setSvg(null);
       setError(null);
+      sweepMermaidStrayRenderRoots(containerRef.current);
       return;
     }
+    /** Clear before each render attempt so a successful parse isn’t preceded by old error text. */
+    setError(null);
+    sweepMermaidStrayRenderRoots(containerRef.current);
     mermaid
       .render(id, debouncedCode)
       .then(({ svg: result }) => {
+        cleanupAfterMermaidRender(id, containerRef.current);
         if (seq !== renderSeqRef.current) return;
+        if (isMermaidSyntaxErrorSvgString(result)) {
+          setError("Syntax error in text");
+          setSvg(null);
+          return;
+        }
         setSvg(result);
         setError(null);
       })
       .catch((err: Error) => {
+        cleanupAfterMermaidRender(id, containerRef.current);
         if (seq !== renderSeqRef.current) return;
         setError(err.message ?? "Invalid Mermaid syntax");
         setSvg(null);
