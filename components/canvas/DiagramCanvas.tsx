@@ -395,7 +395,7 @@ export function DiagramCanvas({
               <SvgManualEditor
                 enabled={svgEditMode}
                 svgHostRef={svgHostRef}
-                svgContentKey={displaySvg}
+                svgContentKey={displaySvg ?? ""}
                 onSvgChange={setManualSvg}
               />
             </div>

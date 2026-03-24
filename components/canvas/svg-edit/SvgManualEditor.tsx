@@ -19,7 +19,7 @@ function setTranslate(g: SVGGElement, x: number, y: number) {
 }
 
 function findManualGroup(el: Element | null): SVGGElement | null {
-  if (!el || el === document) return null;
+  if (!el) return null;
   const g = el.closest(`[${MANUAL_ATTR}="true"]`);
   return g instanceof SVGGElement ? g : null;
 }
