@@ -16,6 +16,7 @@ import {
 import { ChevronRight, Code, Share2, Download, Image as ImageIcon, FileCode, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { downloadMermaidCodeAsMmd } from "@/lib/export-mermaid";
+import { downloadSvgElementAsPng } from "@/lib/svg-export-png";
 
 export default function ProjectRenderPage() {
   const params = useParams();
@@ -91,36 +92,15 @@ export default function ProjectRenderPage() {
       .catch(() => toast({ title: "Share failed", variant: "destructive" }));
   }
 
-  const handleExportPng = useCallback(() => {
-    const svg = canvasRef.current?.querySelector("svg");
-    if (!svg) {
+  const handleExportPng = useCallback(async () => {
+    const el = canvasRef.current?.querySelector("svg");
+    if (!el || !(el instanceof SVGSVGElement)) {
       toast({ title: "Export failed", variant: "destructive" });
       return;
     }
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const bbox = svg.getBBox();
-    canvas.width = bbox.width + 40;
-    canvas.height = bbox.height + 40;
-    const img = new Image();
-    const svgData = new XMLSerializer().serializeToString(svg);
-    img.onload = () => {
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 20, 20);
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${diagram?.title ?? "diagram"}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: "Exported PNG" });
-      });
-    };
-    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
+    const ok = await downloadSvgElementAsPng(el, diagram?.title ?? "diagram");
+    if (ok) toast({ title: "Exported PNG" });
+    else toast({ title: "PNG export failed", variant: "destructive" });
   }, [diagram?.title, toast]);
 
   const handleExportSvg = useCallback(() => {

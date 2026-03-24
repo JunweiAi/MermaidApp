@@ -15,6 +15,7 @@ import { useEditorStore } from "@/store/editorStore";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { downloadMermaidCodeAsMmd } from "@/lib/export-mermaid";
+import { downloadSvgElementAsPng } from "@/lib/svg-export-png";
 import { Moon, Sun } from "lucide-react";
 
 export function EditorPageClient() {
@@ -128,36 +129,15 @@ export function EditorPageClient() {
     toast({ title: "Exported SVG" });
   }, [getSvgElement, title, toast]);
 
-  const handleExportPng = useCallback(() => {
-    const svg = getSvgElement();
-    if (!svg) {
+  const handleExportPng = useCallback(async () => {
+    const el = getSvgElement();
+    if (!el || !(el instanceof SVGSVGElement)) {
       toast({ title: "Ensure the diagram renders first", variant: "destructive" });
       return;
     }
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const bbox = svg.getBBox();
-    canvas.width = bbox.width + 40;
-    canvas.height = bbox.height + 40;
-    const img = new Image();
-    const svgData = new XMLSerializer().serializeToString(svg);
-    img.onload = () => {
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 20, 20);
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${title || "diagram"}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: "Exported PNG" });
-      });
-    };
-    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
+    const ok = await downloadSvgElementAsPng(el, title || "diagram");
+    if (ok) toast({ title: "Exported PNG" });
+    else toast({ title: "PNG export failed", variant: "destructive" });
   }, [getSvgElement, title, toast]);
 
   const handleExportMmd = useCallback(() => {
