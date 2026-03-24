@@ -23,8 +23,6 @@ import {
 } from "@/lib/mermaid-render-cleanup";
 import { cn } from "@/lib/utils";
 
-mermaid.initialize(getMermaidInitConfig("redux"));
-
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
 const SCALE_STEP = 0.25;
@@ -69,6 +67,7 @@ export function DiagramCanvas({
   /** When set, replaces Mermaid SVG for display (manual shapes). Cleared when code/theme changes. */
   const [manualSvg, setManualSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const renderIdRef = useRef(0);
   /** Ignore stale mermaid.render results when code/theme changes (avoids error overwriting success). */
   const renderSeqRef = useRef(0);
@@ -178,6 +177,7 @@ export function DiagramCanvas({
 
   useEffect(() => {
     mermaid.initialize(getMermaidInitConfig(themeKey));
+    setInitialized(true);
   }, [themeKey]);
 
   /** Manual SVG overlay is invalid after source diagram or theme changes. */
@@ -186,6 +186,8 @@ export function DiagramCanvas({
   }, [code, themeKey]);
 
   useEffect(() => {
+    // 等待 mermaid 初始化完成再渲染
+    if (!initialized) return;
     const seq = ++renderSeqRef.current;
     if (!code.trim()) {
       setSvg(null);
@@ -217,7 +219,7 @@ export function DiagramCanvas({
         setError(err.message ?? "Invalid Mermaid syntax");
         setSvg(null);
       });
-  }, [code, themeKey]);
+  }, [code, themeKey, initialized]);
 
   useLayoutEffect(() => {
     if (!displaySvg || !isReduxColorTheme) return;

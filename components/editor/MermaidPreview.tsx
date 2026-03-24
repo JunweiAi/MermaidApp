@@ -11,32 +11,39 @@ import {
 } from "@/lib/mermaid-render-cleanup";
 import { cn } from "@/lib/utils";
 
-mermaid.initialize({
-  startOnLoad: false,
-  theme: "neutral",
-  securityLevel: "loose",
-});
-
 export function MermaidPreview() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const { code } = useEditorStore();
   const renderIdRef = useRef(0);
   const renderSeqRef = useRef(0);
   const [debouncedCode, setDebouncedCode] = useState(code);
   const debounceRef = useRef(debounce((c: string) => setDebouncedCode(c), 300));
 
+  // 在客户端初始化 mermaid，避免 SSR 崩溃
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "neutral",
+      securityLevel: "loose",
+    });
+    setInitialized(true);
+  }, []);
+
   useEffect(() => {
     debounceRef.current(code);
   }, [code]);
 
-  /** While `code` is ahead of debounced preview, clear stale error so a fix isn’t stuck until debounce. */
+  /** While `code` is ahead of debounced preview, clear stale error so a fix isn't stuck until debounce. */
   useEffect(() => {
     if (code !== debouncedCode) setError(null);
   }, [code, debouncedCode]);
 
   useEffect(() => {
+    // 等待 mermaid 初始化完成再渲染
+    if (!initialized) return;
     const seq = ++renderSeqRef.current;
     const id = `mermaid-${Date.now()}-${renderIdRef.current++}`;
     if (!debouncedCode.trim()) {
@@ -45,7 +52,7 @@ export function MermaidPreview() {
       sweepMermaidStrayRenderRoots(containerRef.current);
       return;
     }
-    /** Clear before each render attempt so a successful parse isn’t preceded by old error text. */
+    /** Clear before each render attempt so a successful parse isn't preceded by old error text. */
     setError(null);
     sweepMermaidStrayRenderRoots(containerRef.current);
     mermaid
@@ -67,7 +74,7 @@ export function MermaidPreview() {
         setError(err.message ?? "Invalid Mermaid syntax");
         setSvg(null);
       });
-  }, [debouncedCode]);
+  }, [debouncedCode, initialized]);
 
   return (
     <div
