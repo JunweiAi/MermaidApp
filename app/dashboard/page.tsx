@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ProjectCard } from "@/components/dashboard/ProjectCard";
+import { FeedbackDialog } from "@/components/dashboard/FeedbackDialog";
 import { GitBranch } from "lucide-react";
 
 const defaultCode = `flowchart LR
@@ -19,10 +20,13 @@ export interface DiagramItem {
   updated_at: string;
 }
 
+const MAX_DIAGRAMS = 50;
+
 export default function DashboardPage() {
   const router = useRouter();
   const [diagrams, setDiagrams] = useState<DiagramItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/diagrams")
@@ -32,13 +36,21 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const isAtLimit = diagrams.length >= MAX_DIAGRAMS;
+
   async function handleNewDiagram() {
+    if (isAtLimit) return;
+    setCreateError(null);
     const res = await fetch("/api/diagrams", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Untitled", code: defaultCode }),
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setCreateError(data.error ?? "创建失败");
+      return;
+    }
     const data = await res.json();
     router.push(`/project/${data.id}/edit`);
   }
@@ -63,15 +75,26 @@ export default function DashboardPage() {
       <div className="mb-8 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-gray-900">Recent</h1>
         <div className="flex gap-2">
-          <Button
+          <FeedbackDialog />
+          <span className="text-sm text-gray-400 mr-2">
+          {diagrams.length} / {MAX_DIAGRAMS}
+        </span>
+        <Button
             className="bg-primary hover:bg-primary/90"
             onClick={handleNewDiagram}
+            disabled={isAtLimit}
+            title={isAtLimit ? `已达最大数量 ${MAX_DIAGRAMS} 个` : undefined}
           >
             <GitBranch className="mr-2 h-4 w-4" />
             New diagram
           </Button>
         </div>
       </div>
+      {createError && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600">
+          {createError}
+        </div>
+      )}
       {loading ? (
         <div className="flex justify-center py-16 text-gray-500">Loading…</div>
       ) : diagrams.length === 0 ? (
